@@ -662,7 +662,7 @@
         setStatus("bad", "MediaPipe 组件加载失败");
         toast.classList.add("show");
         console.error("MediaPipe Hands or Camera not loaded");
-        return;
+        return false;
       }
 
       try {
@@ -682,9 +682,6 @@
         });
 
         cameraMP = new window.Camera(videoEl, {
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          facingMode: "user",
           onFrame: async () => {
             if (!hands) return;
             try {
@@ -692,13 +689,17 @@
             } catch (e) {
               console.error("Error sending frame to MediaPipe:", e);
             }
-          }
+          },
+          width: 1280,
+          height: 720
         });
+        
+        return true;
       } catch (e) {
         console.error("Error initializing MediaPipe Hands:", e);
         setStatus("bad", "MediaPipe 初始化失败");
         toast.classList.add("show");
-        throw e;
+        return false;
       }
     }
 
@@ -711,20 +712,41 @@
           throw new Error("浏览器不支持摄像头访问");
         }
         
-        // 检查是否为 HTTPS 或 localhost
-        const isSecureContext = window.isSecureContext || 
-                                location.protocol === 'https:' || 
-                                location.hostname === 'localhost' ||
-                                location.hostname === '127.0.0.1';
-        
-        if (!isSecureContext) {
+        // 检查是否为安全上下文
+        if (!window.isSecureContext) {
           throw new Error("需要 HTTPS 环境才能访问摄像头");
         }
         
-        if (!hands || !cameraMP) await initHands();
+        // 先请求摄像头权限
+        setStatus("warn", "正在请求摄像头权限...");
         
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ 
+            video: { 
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+              facingMode: "user"
+            } 
+          });
+          // 停止测试流，让 MediaPipe Camera 接管
+          stream.getTracks().forEach(track => track.stop());
+        } catch (permErr) {
+          console.error("Permission error:", permErr);
+          if (permErr.name === 'NotAllowedError') {
+            throw new Error("摄像头权限被拒绝，请在浏览器设置中允许访问摄像头");
+          } else if (permErr.name === 'NotFoundError') {
+            throw new Error("未找到摄像头设备");
+          } else {
+            throw new Error(`摄像头访问失败: ${permErr.message}`);
+          }
+        }
+        
+        // 初始化 MediaPipe
         if (!hands || !cameraMP) {
-          throw new Error("MediaPipe 初始化失败");
+          const initSuccess = await initHands();
+          if (!initSuccess) {
+            throw new Error("MediaPipe 初始化失败");
+          }
         }
         
         await cameraMP.start();
@@ -740,7 +762,7 @@
         const toastTitle = document.querySelector(".toast .t1");
         const toastMsg = document.querySelector(".toast .t2");
         toastTitle.textContent = "摄像头启动失败";
-        toastMsg.textContent = `错误: ${e.message || "未知错误"}。请确保: 1) 使用 HTTPS 或 localhost 访问; 2) 已授予摄像头权限; 3) 摄像头未被其他应用占用。`;
+        toastMsg.textContent = e.message || "未知错误";
       }
     }
 
