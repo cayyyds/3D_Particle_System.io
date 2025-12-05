@@ -6,8 +6,9 @@
   <title>Hand-Controlled Particle System (Three.js + MediaPipe)</title>
 
   <!-- MediaPipe Hands (UMD, attaches Hands/Camera to window) -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1640029074/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1620248257/drawing_utils.js" crossorigin="anonymous"></script>
 
   <style>
     :root{
@@ -213,7 +214,8 @@
 
       <div class="footerHint">
         <div>提示：</div>
-        <div>• 摄像头需在 <b>https</b> 或 <b>localhost</b> 使用。</div>
+        <div>• 摄像头需在 <b>https://</b> 环境使用（GitHub Pages 已支持）。</div>
+        <div>• 首次使用需授予浏览器摄像头权限。</div>
         <div>• 若手势抖动：把手放远一点+光线更亮。</div>
       </div>
     </div>
@@ -221,7 +223,7 @@
 
   <div class="toast" id="toast">
     <div class="t1">需要摄像头权限</div>
-    <div class="t2">请允许浏览器访问摄像头；并确保页面运行在 https 或 localhost。</div>
+    <div class="t2">请允许浏览器访问摄像头。确保页面运行在 HTTPS 环境（GitHub Pages 已支持）并授予摄像头权限。</div>
   </div>
 
   <video id="video" autoplay playsinline muted></video>
@@ -658,46 +660,87 @@
     async function initHands(){
       if (!window.Hands || !window.Camera){
         setStatus("bad", "MediaPipe 组件加载失败");
+        toast.classList.add("show");
+        console.error("MediaPipe Hands or Camera not loaded");
         return;
       }
 
-      hands = new window.Hands({
-        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
-      });
+      try {
+        hands = new window.Hands({
+          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${file}`
+        });
 
-      hands.setOptions({
-        maxNumHands: 2,
-        modelComplexity: 1,
-        minDetectionConfidence: 0.6,
-        minTrackingConfidence: 0.6
-      });
+        hands.setOptions({
+          maxNumHands: 2,
+          modelComplexity: 1,
+          minDetectionConfidence: 0.6,
+          minTrackingConfidence: 0.6
+        });
 
-      hands.onResults((results) => {
-        processHands(results);
-      });
+        hands.onResults((results) => {
+          processHands(results);
+        });
 
-      cameraMP = new window.Camera(videoEl, {
-        width: 1280,
-        height: 720,
-        onFrame: async () => {
-          if (!hands) return;
-          await hands.send({ image: videoEl });
-        }
-      });
+        cameraMP = new window.Camera(videoEl, {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          facingMode: "user",
+          onFrame: async () => {
+            if (!hands) return;
+            try {
+              await hands.send({ image: videoEl });
+            } catch (e) {
+              console.error("Error sending frame to MediaPipe:", e);
+            }
+          }
+        });
+      } catch (e) {
+        console.error("Error initializing MediaPipe Hands:", e);
+        setStatus("bad", "MediaPipe 初始化失败");
+        toast.classList.add("show");
+        throw e;
+      }
     }
 
     async function startCamera(){
       try{
         toast.classList.remove("show");
+        
+        // 检查浏览器是否支持 getUserMedia
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          throw new Error("浏览器不支持摄像头访问");
+        }
+        
+        // 检查是否为 HTTPS 或 localhost
+        const isSecureContext = window.isSecureContext || 
+                                location.protocol === 'https:' || 
+                                location.hostname === 'localhost' ||
+                                location.hostname === '127.0.0.1';
+        
+        if (!isSecureContext) {
+          throw new Error("需要 HTTPS 环境才能访问摄像头");
+        }
+        
         if (!hands || !cameraMP) await initHands();
+        
+        if (!hands || !cameraMP) {
+          throw new Error("MediaPipe 初始化失败");
+        }
+        
         await cameraMP.start();
         cameraRunning = true;
         setStatus("good", "摄像头已启用 · 伸出双手试试");
       } catch (e){
-        console.error(e);
+        console.error("Camera start error:", e);
         cameraRunning = false;
-        setStatus("bad", "无法启用摄像头（权限/环境）");
+        setStatus("bad", "无法启用摄像头");
         toast.classList.add("show");
+        
+        // 更新 toast 内容显示具体错误
+        const toastTitle = document.querySelector(".toast .t1");
+        const toastMsg = document.querySelector(".toast .t2");
+        toastTitle.textContent = "摄像头启动失败";
+        toastMsg.textContent = `错误: ${e.message || "未知错误"}。请确保: 1) 使用 HTTPS 或 localhost 访问; 2) 已授予摄像头权限; 3) 摄像头未被其他应用占用。`;
       }
     }
 
