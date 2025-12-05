@@ -1,0 +1,824 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Hand-Controlled Particle System (Three.js + MediaPipe)</title>
+
+  <!-- MediaPipe Hands (UMD, attaches Hands/Camera to window) -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+
+  <style>
+    :root{
+      --bg0:#0b0f17;
+      --bg1:#0a1022;
+      --glass: rgba(255,255,255,.08);
+      --glass2: rgba(255,255,255,.12);
+      --line: rgba(255,255,255,.12);
+      --txt: rgba(255,255,255,.88);
+      --muted: rgba(255,255,255,.62);
+      --good: #32d583;
+      --warn: #fdb022;
+      --bad:  #f04438;
+      --shadow: 0 20px 60px rgba(0,0,0,.45);
+      --radius: 18px;
+    }
+    html,body{height:100%;}
+    body{
+      margin:0;
+      overflow:hidden;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+      color:var(--txt);
+      background:
+        radial-gradient(1200px 800px at 20% 18%, rgba(99,102,241,.18), transparent 55%),
+        radial-gradient(900px 700px at 75% 25%, rgba(16,185,129,.14), transparent 55%),
+        radial-gradient(900px 700px at 60% 90%, rgba(236,72,153,.10), transparent 55%),
+        linear-gradient(180deg, var(--bg0), var(--bg1));
+    }
+
+    #webgl{ position:fixed; inset:0; }
+
+    .topbar{
+      position:fixed; left:16px; top:16px;
+      display:flex; gap:12px; align-items:center;
+      z-index:10;
+      pointer-events:none;
+    }
+    .brand{
+      pointer-events:auto;
+      padding:10px 14px;
+      border:1px solid var(--line);
+      background:linear-gradient(180deg, var(--glass), rgba(255,255,255,.04));
+      border-radius:999px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+      display:flex; gap:10px; align-items:center;
+    }
+    .dot{
+      width:10px; height:10px; border-radius:50%;
+      background:var(--warn);
+      box-shadow: 0 0 18px rgba(253,176,34,.55);
+    }
+    .title{
+      font-weight:700; font-size:13px; letter-spacing:.2px;
+    }
+    .subtitle{
+      font-size:12px; color:var(--muted);
+      margin-left:6px;
+    }
+
+    .panel{
+      position:fixed; right:16px; top:16px;
+      width:320px;
+      z-index:10;
+      border:1px solid var(--line);
+      background:linear-gradient(180deg, var(--glass2), rgba(255,255,255,.05));
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(12px);
+      overflow:hidden;
+    }
+    .panel header{
+      padding:14px 14px 10px;
+      display:flex; justify-content:space-between; gap:10px; align-items:flex-start;
+      border-bottom:1px solid var(--line);
+    }
+    .panel header .h1{ font-weight:800; font-size:14px; }
+    .panel header .h2{ font-size:12px; color:var(--muted); margin-top:2px; line-height:1.35;}
+    .panel .body{ padding:12px 14px 14px; display:flex; flex-direction:column; gap:12px; }
+    .row{ display:grid; grid-template-columns: 110px 1fr; gap:10px; align-items:center; }
+    label{ font-size:12px; color:var(--muted); }
+    select, input[type="color"], input[type="range"], button{
+      width:100%;
+      border:1px solid var(--line);
+      background: rgba(0,0,0,.25);
+      color:var(--txt);
+      border-radius: 12px;
+      padding:10px 10px;
+      outline:none;
+    }
+    select{ padding:10px 12px; }
+    input[type="color"]{ padding:6px; height:42px; }
+    input[type="range"]{ padding:10px 10px; }
+
+    .btnrow{ display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+    button{
+      cursor:pointer;
+      transition: transform .08s ease, background .2s ease, border-color .2s ease;
+    }
+    button:hover{ transform: translateY(-1px); border-color: rgba(255,255,255,.22); background: rgba(0,0,0,.30); }
+    button:active{ transform: translateY(0px) scale(.99); }
+
+    .chip{
+      display:inline-flex; gap:8px; align-items:center;
+      padding:8px 10px;
+      border:1px solid var(--line);
+      border-radius:999px;
+      background: rgba(0,0,0,.22);
+      font-size:12px; color:var(--muted);
+    }
+    .chip b{ color:var(--txt); font-weight:700; }
+    .footerHint{
+      margin-top:4px;
+      font-size:12px;
+      color:var(--muted);
+      line-height:1.45;
+      border-top:1px solid var(--line);
+      padding-top:10px;
+    }
+
+    /* hidden video (still used by MediaPipe Camera) */
+    #video{
+      position:fixed; left:-9999px; top:-9999px;
+      width:1px; height:1px; opacity:0;
+    }
+
+    .toast{
+      position:fixed; left:16px; bottom:16px;
+      z-index:10;
+      border:1px solid var(--line);
+      background:linear-gradient(180deg, var(--glass2), rgba(255,255,255,.05));
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+      padding:12px 14px;
+      max-width: 560px;
+      display:none;
+    }
+    .toast.show{ display:block; }
+    .toast .t1{ font-weight:800; font-size:13px; margin-bottom:4px;}
+    .toast .t2{ font-size:12px; color:var(--muted); line-height:1.4;}
+  </style>
+</head>
+
+<body>
+  <div id="webgl"></div>
+
+  <div class="topbar">
+    <div class="brand">
+      <div class="dot" id="statusDot"></div>
+      <div>
+        <div class="title">Hand → Particles</div>
+        <div class="subtitle" id="statusText">未启用摄像头</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <header>
+      <div>
+        <div class="h1">控制面板</div>
+        <div class="h2">两手距离=缩放 · 捏合/张开=扩散</div>
+      </div>
+      <div class="chip"><span>FPS</span><b id="fps">--</b></div>
+    </header>
+
+    <div class="body">
+      <div class="row">
+        <label>粒子模型</label>
+        <select id="shape">
+          <option value="heart">爱心</option>
+          <option value="flower">花朵</option>
+          <option value="saturn">土星</option>
+          <option value="buddha">佛像</option>
+          <option value="fireworks">烟花</option>
+        </select>
+      </div>
+
+      <div class="row">
+        <label>粒子颜色</label>
+        <input id="color" type="color" value="#7cdbff"/>
+      </div>
+
+      <div class="row">
+        <label>粒子数量</label>
+        <input id="count" type="range" min="8000" max="80000" step="1000" value="26000"/>
+      </div>
+
+      <div class="row">
+        <label>粒子大小</label>
+        <input id="size" type="range" min="0.6" max="5.0" step="0.1" value="1.6"/>
+      </div>
+
+      <div class="row">
+        <label>扩散强度</label>
+        <input id="spread" type="range" min="0.0" max="2.6" step="0.05" value="1.25"/>
+      </div>
+
+      <div class="btnrow">
+        <button id="btnCamera">启用摄像头</button>
+        <button id="btnFullscreen">全屏</button>
+      </div>
+
+      <div class="footerHint">
+        <div>提示：</div>
+        <div>• 摄像头需在 <b>https</b> 或 <b>localhost</b> 使用。</div>
+        <div>• 若手势抖动：把手放远一点+光线更亮。</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast">
+    <div class="t1">需要摄像头权限</div>
+    <div class="t2">请允许浏览器访问摄像头；并确保页面运行在 https 或 localhost。</div>
+  </div>
+
+  <video id="video" autoplay playsinline muted></video>
+
+  <script type="module">
+    import * as THREE from "https://unpkg.com/three@0.181.2/build/three.module.js";
+    import { OrbitControls } from "https://unpkg.com/three@0.181.2/examples/jsm/controls/OrbitControls.js";
+
+    // -----------------------
+    // Small helpers
+    // -----------------------
+    const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+    const lerp = (a,b,t) => a + (b-a)*t;
+
+    function smooth01(x){
+      x = clamp(x, 0, 1);
+      return x * x * (3 - 2*x);
+    }
+
+    function map(v, inMin, inMax, outMin, outMax){
+      const t = (v - inMin) / (inMax - inMin);
+      return outMin + clamp(t,0,1) * (outMax - outMin);
+    }
+
+    function dist3(a,b){
+      const dx=a.x-b.x, dy=a.y-b.y, dz=(a.z??0)-(b.z??0);
+      return Math.hypot(dx,dy,dz);
+    }
+
+    // -----------------------
+    // Three.js scene
+    // -----------------------
+    const mount = document.getElementById("webgl");
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x070a12, 0.18);
+
+    const camera = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 0.01, 80);
+    camera.position.set(0, 0, 6);
+
+    const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true, powerPreference:"high-performance" });
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    mount.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.enablePan = false;
+    controls.minDistance = 2.2;
+    controls.maxDistance = 16;
+    controls.autoRotate = true;
+    controls.autoRotateSpeed = 0.35;
+
+    const light = new THREE.DirectionalLight(0xffffff, 0.35);
+    light.position.set(2,3,4);
+    scene.add(light);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.18));
+
+    // -----------------------
+    // Particle System
+    // -----------------------
+    class ParticleModel {
+      static heart(count){
+        const pts = new Float32Array(count * 3);
+        for (let i=0;i<count;i++){
+          const t = Math.random() * Math.PI * 2;
+          const x = 16 * Math.pow(Math.sin(t), 3);
+          const y = 13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t);
+
+          // thickness + slight wobble
+          const z = (Math.random()*2 - 1) * 2.2;
+
+          // normalize
+          const nx = x / 18;
+          const ny = y / 18;
+
+          // make it more 3D: push points outward by a radial factor
+          const r = Math.hypot(nx, ny) + 1e-6;
+          const push = 0.25 + 0.55 * Math.random();
+          pts[i*3+0] = nx * push;
+          pts[i*3+1] = ny * push;
+          pts[i*3+2] = (z/18) * (0.7 + 0.6*Math.random()) * (0.35 + 0.65*(1 - clamp(r,0,1)));
+        }
+        return pts;
+      }
+
+      static flower(count){
+        const pts = new Float32Array(count * 3);
+        // rose-ish parametric surface
+        for (let i=0;i<count;i++){
+          const a = Math.random() * Math.PI * 2;
+          const u = Math.random();
+          const petal = 6;
+          const r = (0.18 + 0.82*u) * (0.55 + 0.45*Math.sin(petal*a));
+          const x = r * Math.cos(a);
+          const y = r * Math.sin(a);
+          const z = (Math.cos(a*2) * (1-u) * 0.35) + (Math.random()*2-1)*0.05;
+          pts[i*3+0] = x * 2.2;
+          pts[i*3+1] = y * 2.2;
+          pts[i*3+2] = z * 2.2;
+        }
+        return pts;
+      }
+
+      static saturn(count){
+        const pts = new Float32Array(count * 3);
+        for (let i=0;i<count;i++){
+          const chooseRing = Math.random() < 0.42;
+          if (chooseRing){
+            const a = Math.random() * Math.PI * 2;
+            const rr = 1.45 + Math.random()*1.25;
+            const th = (Math.random()*2-1) * 0.12;
+            pts[i*3+0] = Math.cos(a) * rr;
+            pts[i*3+1] = th;
+            pts[i*3+2] = Math.sin(a) * rr;
+          } else {
+            // sphere
+            const u = Math.random();
+            const v = Math.random();
+            const theta = 2*Math.PI*u;
+            const phi = Math.acos(2*v - 1);
+            const r = 1.05 + (Math.random()*0.06);
+            pts[i*3+0] = r * Math.sin(phi) * Math.cos(theta);
+            pts[i*3+1] = r * Math.cos(phi);
+            pts[i*3+2] = r * Math.sin(phi) * Math.sin(theta);
+          }
+        }
+        return pts;
+      }
+
+      // Soft "metaball" buddha-ish silhouette using rejection sampling
+      static buddha(count){
+        const pts = new Float32Array(count * 3);
+
+        // metaball field: sum exp(-d^2 / s^2)
+        const blobs = [
+          // head + bun
+          { p:new THREE.Vector3(0, 1.35, 0), s:0.52, w:1.25 },
+          { p:new THREE.Vector3(0, 1.78, 0), s:0.28, w:0.95 },
+          // torso
+          { p:new THREE.Vector3(0, 0.65, 0), s:0.85, w:1.05 },
+          // belly
+          { p:new THREE.Vector3(0, 0.25, 0), s:0.92, w:1.10 },
+          // legs base
+          { p:new THREE.Vector3(0, -0.55, 0), s:1.15, w:1.18 },
+          // knees
+          { p:new THREE.Vector3(-0.85, -0.55, 0.25), s:0.60, w:0.95 },
+          { p:new THREE.Vector3( 0.85, -0.55, 0.25), s:0.60, w:0.95 },
+          // arms
+          { p:new THREE.Vector3(-0.95, 0.45, 0.15), s:0.58, w:0.85 },
+          { p:new THREE.Vector3( 0.95, 0.45, 0.15), s:0.58, w:0.85 },
+        ];
+
+        const field = (x,y,z)=>{
+          let v=0;
+          for (const b of blobs){
+            const dx=x-b.p.x, dy=y-b.p.y, dz=z-b.p.z;
+            const d2 = dx*dx+dy*dy+dz*dz;
+            v += b.w * Math.exp(-d2/(b.s*b.s));
+          }
+          return v;
+        };
+
+        // sample within a box and accept points near isosurface band
+        let i=0, guard=0;
+        while (i<count && guard < count*60){
+          guard++;
+          const x = (Math.random()*2-1) * 1.8;
+          const y = (Math.random()*2-1) * 2.0;
+          const z = (Math.random()*2-1) * 1.2;
+          const f = field(x,y,z);
+
+          // keep near surface: f around ~1.0
+          const band = Math.abs(f - 1.02);
+          if (band < 0.06 + Math.random()*0.02){
+            pts[i*3+0] = x;
+            pts[i*3+1] = y;
+            pts[i*3+2] = z;
+            i++;
+          }
+        }
+
+        // if underfilled, fallback sprinkle
+        for (; i<count; i++){
+          pts[i*3+0] = (Math.random()*2-1) * 1.2;
+          pts[i*3+1] = (Math.random()*2-1) * 1.6;
+          pts[i*3+2] = (Math.random()*2-1) * 0.9;
+        }
+        return pts;
+      }
+
+      static fireworks(count){
+        const pts = new Float32Array(count * 3);
+        const bursts = 6;
+        const centers = Array.from({length:bursts}, (_,k)=>{
+          const a = (k/bursts) * Math.PI*2 + (Math.random()*0.6);
+          const rr = 0.4 + Math.random()*1.2;
+          return new THREE.Vector3(Math.cos(a)*rr, (Math.random()*1.6)-0.2, Math.sin(a)*rr);
+        });
+
+        for (let i=0;i<count;i++){
+          const c = centers[Math.floor(Math.random()*bursts)];
+          const a = Math.random()*Math.PI*2;
+          const b = Math.acos(2*Math.random()-1);
+          const r = Math.pow(Math.random(), 0.18) * (0.55 + Math.random()*1.95);
+          const x = c.x + r*Math.sin(b)*Math.cos(a);
+          const y = c.y + r*Math.cos(b);
+          const z = c.z + r*Math.sin(b)*Math.sin(a);
+          pts[i*3+0] = x;
+          pts[i*3+1] = y;
+          pts[i*3+2] = z;
+        }
+        return pts;
+      }
+    }
+
+    class Particles {
+      constructor(){
+        this.count = 26000;
+        this.shape = "heart";
+        this.color = new THREE.Color("#7cdbff");
+        this.size = 1.6;
+        this.spreadStrength = 1.25;
+
+        this.base = null;
+        this.offset = null;
+        this.phase = null;
+
+        this.geometry = new THREE.BufferGeometry();
+        this.positions = new Float32Array(this.count*3);
+
+        this.mat = new THREE.PointsMaterial({
+          color: this.color,
+          size: this.size * 0.015,
+          transparent:true,
+          opacity: 0.95,
+          blending: THREE.AdditiveBlending,
+          depthWrite:false,
+          sizeAttenuation:true
+        });
+
+        this.points = new THREE.Points(this.geometry, this.mat);
+        scene.add(this.points);
+
+        this.reset(this.shape, this.count);
+      }
+
+      generate(shape, count){
+        switch(shape){
+          case "heart": return ParticleModel.heart(count);
+          case "flower": return ParticleModel.flower(count);
+          case "saturn": return ParticleModel.saturn(count);
+          case "buddha": return ParticleModel.buddha(count);
+          case "fireworks": return ParticleModel.fireworks(count);
+          default: return ParticleModel.heart(count);
+        }
+      }
+
+      reset(shape, count){
+        this.shape = shape;
+        this.count = count;
+
+        this.base = this.generate(shape, count);
+
+        this.offset = new Float32Array(count*3);
+        this.phase  = new Float32Array(count);
+
+        // stable random field for diffusion directions
+        for (let i=0;i<count;i++){
+          const a = Math.random()*Math.PI*2;
+          const b = Math.acos(2*Math.random()-1);
+          const ox = Math.sin(b)*Math.cos(a);
+          const oy = Math.cos(b);
+          const oz = Math.sin(b)*Math.sin(a);
+          const m = 0.25 + Math.random()*1.0;
+          this.offset[i*3+0] = ox*m;
+          this.offset[i*3+1] = oy*m;
+          this.offset[i*3+2] = oz*m;
+          this.phase[i] = Math.random()*Math.PI*2;
+        }
+
+        this.positions = new Float32Array(count*3);
+        this.geometry.setAttribute("position", new THREE.BufferAttribute(this.positions, 3));
+        this.geometry.computeBoundingSphere();
+      }
+
+      setColor(hex){
+        this.color.set(hex);
+        this.mat.color.copy(this.color);
+      }
+
+      setSize(v){
+        this.size = v;
+        this.mat.size = this.size * 0.015;
+      }
+
+      setSpreadStrength(v){
+        this.spreadStrength = v;
+      }
+
+      update(scale, diffuse, t){
+        // diffuse: 0..1
+        const d = diffuse * this.spreadStrength;
+        const pos = this.positions;
+        const base = this.base;
+        const off  = this.offset;
+        const ph   = this.phase;
+
+        // mild rotation / breathing
+        const wob = 0.06 + 0.02*Math.sin(t*0.8);
+        const swirl = 0.18 + 0.1*Math.sin(t*0.35);
+        const cs = Math.cos(swirl), sn = Math.sin(swirl);
+
+        for (let i=0;i<this.count;i++){
+          const k = i*3;
+
+          let x = base[k+0] * scale;
+          let y = base[k+1] * scale;
+          let z = base[k+2] * scale;
+
+          // swirl around Y
+          const rx = x*cs - z*sn;
+          const rz = x*sn + z*cs;
+          x = rx; z = rz;
+
+          // diffusion
+          const s = d * (0.7 + 0.3*Math.sin(t*0.9 + ph[i]));
+          x += off[k+0] * s;
+          y += off[k+1] * s;
+          z += off[k+2] * s;
+
+          // shimmer
+          const shimmer = wob * Math.sin(t*1.4 + ph[i]*2.1);
+          x += (off[k+2]) * shimmer * 0.10;
+          y += (off[k+0]) * shimmer * 0.08;
+          z += (off[k+1]) * shimmer * 0.10;
+
+          pos[k+0] = x;
+          pos[k+1] = y;
+          pos[k+2] = z;
+        }
+
+        this.geometry.attributes.position.needsUpdate = true;
+      }
+    }
+
+    const particles = new Particles();
+
+    // -----------------------
+    // Hand Tracking (MediaPipe Hands)
+    // -----------------------
+    const statusDot = document.getElementById("statusDot");
+    const statusText = document.getElementById("statusText");
+    const toast = document.getElementById("toast");
+
+    const videoEl = document.getElementById("video");
+
+    let hands = null;
+    let cameraMP = null;
+    let cameraRunning = false;
+
+    // Gesture -> control targets (smoothed)
+    const control = {
+      // targets updated by hand results
+      targetScale: 1.0,
+      targetDiffuse: 0.12,
+
+      // smoothed values used in render loop
+      scale: 1.0,
+      diffuse: 0.12,
+
+      handsSeen: 0,
+      lastSeenAt: 0
+    };
+
+    function setStatus(kind, text){
+      statusText.textContent = text;
+      if (kind === "good"){
+        statusDot.style.background = "var(--good)";
+        statusDot.style.boxShadow = "0 0 18px rgba(50,213,131,.55)";
+      } else if (kind === "warn"){
+        statusDot.style.background = "var(--warn)";
+        statusDot.style.boxShadow = "0 0 18px rgba(253,176,34,.55)";
+      } else {
+        statusDot.style.background = "var(--bad)";
+        statusDot.style.boxShadow = "0 0 18px rgba(240,68,56,.55)";
+      }
+    }
+
+    function handCenter(lm){
+      let x=0,y=0,z=0;
+      for (let i=0;i<lm.length;i++){
+        x += lm[i].x; y += lm[i].y; z += (lm[i].z ?? 0);
+      }
+      return { x:x/lm.length, y:y/lm.length, z:z/lm.length };
+    }
+
+    function pinchOpen01(lm){
+      // thumb tip = 4, index tip = 8, wrist = 0, middle_mcp = 9 (stable hand size ref)
+      const handSize = dist3(lm[0], lm[9]) + 1e-6;
+      const pinch = dist3(lm[4], lm[8]);
+      const n = pinch / handSize;
+      // map to 0..1 (tuned)
+      return smooth01(map(n, 0.22, 1.05, 0.0, 1.0));
+    }
+
+    function processHands(results){
+      const lms = results.multiHandLandmarks || [];
+      control.handsSeen = lms.length;
+
+      if (lms.length === 0){
+        return;
+      }
+
+      control.lastSeenAt = performance.now();
+
+      // diffusion by pinch openness (avg across hands)
+      let openAvg = 0;
+      for (const lm of lms) openAvg += pinchOpen01(lm);
+      openAvg /= lms.length;
+
+      // scale: if 2 hands, use distance between centers; else gently follow openness
+      if (lms.length >= 2){
+        const c0 = handCenter(lms[0]);
+        const c1 = handCenter(lms[1]);
+        const d = Math.hypot(c0.x - c1.x, c0.y - c1.y); // normalized [0..~1]
+        control.targetScale = map(d, 0.18, 0.62, 0.65, 2.85);
+      } else {
+        control.targetScale = map(openAvg, 0.0, 1.0, 0.85, 2.15);
+      }
+
+      control.targetDiffuse = map(openAvg, 0.0, 1.0, 0.06, 1.0);
+    }
+
+    async function initHands(){
+      if (!window.Hands || !window.Camera){
+        setStatus("bad", "MediaPipe 组件加载失败");
+        return;
+      }
+
+      hands = new window.Hands({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+      });
+
+      hands.setOptions({
+        maxNumHands: 2,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.6,
+        minTrackingConfidence: 0.6
+      });
+
+      hands.onResults((results) => {
+        processHands(results);
+      });
+
+      cameraMP = new window.Camera(videoEl, {
+        width: 1280,
+        height: 720,
+        onFrame: async () => {
+          if (!hands) return;
+          await hands.send({ image: videoEl });
+        }
+      });
+    }
+
+    async function startCamera(){
+      try{
+        toast.classList.remove("show");
+        if (!hands || !cameraMP) await initHands();
+        await cameraMP.start();
+        cameraRunning = true;
+        setStatus("good", "摄像头已启用 · 伸出双手试试");
+      } catch (e){
+        console.error(e);
+        cameraRunning = false;
+        setStatus("bad", "无法启用摄像头（权限/环境）");
+        toast.classList.add("show");
+      }
+    }
+
+    function stopCamera(){
+      // MediaPipe Camera utils doesn't expose a perfect stop() across all builds,
+      // but we can stop the underlying stream:
+      const stream = videoEl.srcObject;
+      if (stream && stream.getTracks){
+        stream.getTracks().forEach(t=>t.stop());
+      }
+      videoEl.srcObject = null;
+      cameraRunning = false;
+      setStatus("warn", "摄像头已停止");
+    }
+
+    // -----------------------
+    // UI bindings
+    // -----------------------
+    const elShape = document.getElementById("shape");
+    const elColor = document.getElementById("color");
+    const elCount = document.getElementById("count");
+    const elSize  = document.getElementById("size");
+    const elSpread= document.getElementById("spread");
+
+    const btnCamera = document.getElementById("btnCamera");
+    const btnFull   = document.getElementById("btnFullscreen");
+
+    elShape.addEventListener("change", ()=>{
+      particles.reset(elShape.value, particles.count);
+    });
+
+    elColor.addEventListener("input", ()=>{
+      particles.setColor(elColor.value);
+    });
+
+    elCount.addEventListener("input", ()=>{
+      const c = parseInt(elCount.value, 10);
+      particles.reset(particles.shape, c);
+    });
+
+    elSize.addEventListener("input", ()=>{
+      particles.setSize(parseFloat(elSize.value));
+    });
+
+    elSpread.addEventListener("input", ()=>{
+      particles.setSpreadStrength(parseFloat(elSpread.value));
+    });
+
+    btnCamera.addEventListener("click", async ()=>{
+      if (!cameraRunning){
+        btnCamera.textContent = "停止摄像头";
+        await startCamera();
+      } else {
+        btnCamera.textContent = "启用摄像头";
+        stopCamera();
+      }
+    });
+
+    btnFull.addEventListener("click", async ()=>{
+      const doc = document;
+      if (!doc.fullscreenElement){
+        await doc.documentElement.requestFullscreen?.();
+      } else {
+        await doc.exitFullscreen?.();
+      }
+    });
+
+    // -----------------------
+    // Resize
+    // -----------------------
+    addEventListener("resize", ()=>{
+      camera.aspect = innerWidth/innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+      renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    });
+
+    // -----------------------
+    // Render loop + FPS
+    // -----------------------
+    const fpsEl = document.getElementById("fps");
+    let lastFpsT = performance.now();
+    let frames = 0;
+
+    function animate(tms){
+      const t = tms * 0.001;
+
+      // if hands missing, drift back to calm state after a short time
+      const since = performance.now() - control.lastSeenAt;
+      if (cameraRunning && since > 250){
+        control.targetScale = lerp(control.targetScale, 1.0, 0.06);
+        control.targetDiffuse = lerp(control.targetDiffuse, 0.12, 0.06);
+        setStatus("warn", "未检测到手 · 调整位置/光线");
+      } else if (cameraRunning) {
+        setStatus("good", control.handsSeen ? `检测到 ${control.handsSeen} 只手` : "检测中…");
+      }
+
+      // smooth
+      control.scale   = lerp(control.scale, control.targetScale, 0.13);
+      control.diffuse = lerp(control.diffuse, control.targetDiffuse, 0.16);
+
+      particles.update(control.scale, control.diffuse, t);
+
+      controls.update();
+      renderer.render(scene, camera);
+
+      // fps
+      frames++;
+      const now = performance.now();
+      if (now - lastFpsT > 450){
+        fpsEl.textContent = Math.round(frames * 1000 / (now - lastFpsT));
+        frames = 0;
+        lastFpsT = now;
+      }
+
+      requestAnimationFrame(animate);
+    }
+    requestAnimationFrame(animate);
+
+    // initial status
+    setStatus("warn", "点击「启用摄像头」开始");
+  </script>
+</body>
+</html>
